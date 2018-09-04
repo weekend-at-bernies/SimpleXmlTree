@@ -31,7 +31,7 @@ class SimpleXmlTree(object):
         if os.path.exists(self.xmlfile):
             # Check we have R/W access:
             f = open(self.xmlfile, 'rw')  
-            # Throws xml.etree.ElementTree.ParseError if input xml is malformed or empty file:
+            # Throws xml.etree.ElementTree.ParseError if input xml is malformed (XML syntax error) or is empty file:
             self.et = xml.etree.ElementTree.parse(self.xmlfile) 
                  
         elif (create and len(root_tag) > 0):
@@ -41,22 +41,23 @@ class SimpleXmlTree(object):
         else:
             # FIXME:
             raise IOError("Error: invalid arguments provided")     
-          
+        self.root = XmlNode(self.et.getroot())         
         f.close()
         
 
     def getRoot(self):
-        return XmlNode(self.et.getroot())
+        return self.root
 
 
+    # FIXME : WHAT IS THIS FUNCTION FOR PLEASE????
     # FIXME : change to write or append file?
     def update(self, indentwidth=2):
         f = open(self.xmlfile, 'w+') 
-        f.write(self.getRoot().dump(indentwidth))
+        f.write(self.root.dump(indentwidth))
         f.close()
 
     def __str__(self):
-        return self.getRoot().dump()
+        return self.root.dump()
         
 
 ##########################################################################################################################
@@ -190,10 +191,8 @@ class XmlTreeVisitor(object):
 
 ##########################################################################################################################
 
-# A sample tree visitor implementation for debugging purposes:
-
-# FIXME: describe how to implement
-
+# A debugging class that is used by XmlNode.getLineage():
+#
 class RootTracer(XmlTreeVisitor):
 
     def __init__(self, tag=None):
@@ -204,87 +203,79 @@ class RootTracer(XmlTreeVisitor):
 
     def previsit_parentvisitor(self, node): 
         self.map.insert(0, node)
-        if (self.tag is not None) and (self.tag == node.getTag()):
-            return self.map
+        if self.tag is not None:
+            if self.tag == node.getTag():
+                return self.map
            
     def postvisit_parentvisitor(self, node):  
         return self.map
 
 ##########################################################################################################################
 
+# XML node 101:
+#
+# <MyTag attrib1='int' attrib2='50'>144</MyTag>
+#
+# MyTag : this is node tag (mandatory)
+# 144 : this is node val (optional: when no val exists, the node is called an "empty tag")
+# 'int, '50', ... : these are node attrib (optional)
+#
 class XmlNode(object):
 
-    def __init__(self, node, tag=None, val=None):
+    # 'tva' : tag, val, attrib 
+    def __init__(self, node, tva=None): # tag=None, val=None):
         self.parent = None
+        self.children = []
+
         # Create XmlNode from existing xml.etree.ElementTree.Element:
         if node is not None:
             self.node = node
+            for c in self.node:
+                n = XmlNode(c)
+                n.parent = self
+                self.children.append(n)
+
         # Else create a brand new XmlNode:
-        elif tag is not None:
+        elif tva is not None:
+
+            # Will raise TypeError if this does not evaluate true: > type(tva) == list
+            if len(tva) != 3:
+                raise ValueError("Error: error message here")
+
+            tag = tva[0] # Mandatory
+            val = tva[1] # Optional (but must be string)
+            attrib = tva[2] # Optional 
+
             self.node = xml.etree.ElementTree.Element(tag)
             if val is not None:
-                if len(str(val).strip()) > 0:
-                    self.node.text = str(val).strip()
+                self.node.text = val
+                #if len(str(val).strip()) > 0:
+                #    self.node.text = str(val).strip()
+
+            # FIXME : process attribs
+            if attrib is not None:
+                pass
         else:
             # FIXME:
-            raise Exception
+            raise ValueError("Error: error message here")
+
+        
 
     #########################################################################################################
-    # PRIVATE TREE FUNCTIONALITY
+    # CORE NODE FUNCTIONALITY (tag, val, attrib)
 
-    # FIXME: need a remove() (opposite to append), and dump()
+    # Return the "MyTag" part of: <MyTag>val</MyTag>
+    def getTag(self):
+        return self.node.tag
 
-    # Make this class iterable, ie.
-    # for node in self:
-    #     ...
-    def __iter__(self):
-        # This is cool: return an iterator of XmlNode objects, each one instantiated from the iterable self.node!
-        #return iter(map(XmlNode, self.node))
-        children = []
-        for n in self.node:
-            node = XmlNode(n)
-            node.parent = self
-            children.append(node)
-        return iter(children)
-
-    def __len__(self):
-        return len(self.node)
-
-    def __str__(self):
-        # FIXME: need to print any 'attrib' as well
-       # return "<%s>%s</%s>"%(self.getTag(), self.getVal(), self.getTag())
-        s = ""
-        s += "<%s"%(self.getTag())
-        for attrib in self.getAttrib():
-            s += " %s='%s'"%(attrib, self.getAttribVal(attrib))
-        s += ">"
-        if self.hasVal():
-            s += "%s"%(self.getVal()) 
-        s += "</%s>"%(self.getTag())
-        
-        return s
-
-    def strformat1(self, indentwidth=2, indentcount=0):
-        s = ""
-        s += self.getIndentStr(indentwidth, indentcount) + "<%s"%(self.getTag())
-        for attrib in self.getAttrib():
-            s += " %s='%s'"%(attrib, self.getAttribVal(attrib))
-        s += ">"
-
-        if self.hasVal():
-            s += "%s"%(self.getVal()) 
-        s += "\n"
-        for c in self:
-            s += c.strformat1(indentwidth, (indentcount + 1))
-        s += self.getIndentStr(indentwidth, indentcount) + "</%s>\n"%(self.getTag())
-        return s
-
-    # Add children to this node.
-    def add(self, children):
-        for c in children:
-            c.parent = self
-            self.node.append(c.node)
-
+    # Return the "val" part of: <MyTag>val</MyTag>
+    # If empty tag (ie. val DNE), then return empty string.
+    # FIXME: WHY IS STRIP() important?
+    def getVal(self):
+        if self.node.text is None:
+            return ""
+        else:
+            return self.node.text.strip()
 
     # Suppose your node is like this: <country name="Australia" capital="Canberra> </country>
     # Then self.node.attrib is this dictionary: { ('name' : 'Australia') , ('capital' : 'Canberra') }
@@ -296,16 +287,70 @@ class XmlNode(object):
     def getAttribVal(self, attrib):
         return self.node.attrib.get(attrib, None)
 
-    def hasAttrib(self, attrib=None):
-        if None is attrib:
-            if len(self.node.attrib.keys()) > 0:
-                return True
-        elif self.getAttribVal(attrib) is not None:
-            return True
-        return False
-            
-        # FIX ME has attrib 
 
+    # Sets val of this node
+    # FIXME: WHY IS STRIP() important?
+    def setVal(self, val):
+        if (len(str(val).strip()) > 0):
+            self.node.text = str(val).strip()
+
+    # FIXME: require functions: setTag() and setAttrib() ???
+
+    #########################################################################################################
+    # CORE NODE FUNCTIONALITY 
+
+    # Make this class iterable, ie.
+    # for node in self:
+    #     ...
+    # In this case return an iterator over the child nodes.
+    def __iter__(self):
+        return iter(self.children)
+
+    # Returns the number of child nodes:
+    def __len__(self):
+        return len(self.children)
+
+    #########################################################################################################
+    # CORE DEBUG FUNCTIONALITY (pretty print functions)
+
+    # Returns a string like this: <MyTag attrib1='int' attrib2='50'>144</MyTag>
+    def __str__(self):
+        s = ""
+        s += "<%s"%(self.getTag())
+        for attrib in self.getAttrib():
+            s += " %s='%s'"%(attrib, self.getAttribVal(attrib))
+        s += ">%s</%s>"%(self.getVal(), self.getTag())
+        return s
+
+    # Dumps valid XML rooted at this node
+    def dump(self, indentwidth=2):
+        return self.strformat1(indentwidth)
+
+    # Dumps tag lineage back/from a specified node, or assumes root.
+    # Example output:
+    # [ <root> ] --> [ <tag1> ] --> [ <tag2> ] --> ... --> [ <this_node> ]
+    def getLineage(self, rootTag=None, fromRoot=True):
+        l = (RootTracer(rootTag)).visit(self)
+        if not fromRoot:
+            l.reverse()
+        s = ""
+        for n in l:
+            if len(s) > 0:
+                s += " --> " 
+            s += "[ <%s> ]"%(n.getTag())
+        return s
+
+    def strformat1(self, indentwidth=2, indentcount=0):
+        s = ""
+        s += self.getIndentStr(indentwidth, indentcount) + "<%s"%(self.getTag())
+        for attrib in self.getAttrib():
+            s += " %s='%s'"%(attrib, self.getAttribVal(attrib))
+        s += ">%s\n"%(self.getVal())
+        for c in self:
+            s += c.strformat1(indentwidth, (indentcount + 1))
+        s += self.getIndentStr(indentwidth, indentcount) + "</%s>\n"%(self.getTag())
+        return s
+       
     def getIndentStr(self, indentwidth, indentcount):
         s1 = ""
         s2 = ""
@@ -319,34 +364,9 @@ class XmlNode(object):
             i += 1
         return s2
 
+
     #########################################################################################################
-    # PUBLIC TREE FUNCTIONALITY
-
-    # Return the "node" part of: <node> val </node>
-    def getTag(self):
-        return self.node.tag
-
-    # Return the "val" part of: <node> val </node>
-    def getVal(self):
-        return self.node.text.strip()
-
-    # Sets val of this node
-    def setVal(self, val):
-        if (len(str(val).strip()) > 0):
-            self.node.text = str(val).strip()
-
-    # Is there a "val" part of:<node> val </node>
-    # A whitespace val will return: False
-    def hasVal(self):
-        if self.node.text is None:
-            return False
-        elif len((self.node.text).strip()) == 0:
-            return False
-        return True
-
-    # Dumps valid .xml
-    def dump(self, indentwidth=2):
-        return self.strformat1(indentwidth)
+    # PUBLIC FUNCTIONALITY
 
     # Am I a root node (ie. I have no parent)?
     def isRoot(self):
@@ -356,13 +376,61 @@ class XmlNode(object):
 
     # Am I a parent node (ie. I have children)?
     def isParent(self):
-        if len(self) > 0:
-            return True
-        return False
+        return len(self) > 0
 
-    # Am I a child node (ie. I have no children)?
-    def isChild(self):
+    # Am I a childless node (ie. I have no children)?
+    def isChildless(self):
         return not self.isParent()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    #########################################################################################################
+    # PRIVATE TREE FUNCTIONALITY
+
+    # FIXME: need a remove() (opposite to append), and dump()
+
+    
+
+    # Add children to this node.
+    def add(self, children):
+        for c in children:
+            c.parent = self
+            self.node.append(c.node)
+
+    
+
+    #########################################################################################################
+    # PUBLIC TREE FUNCTIONALITY
+
+    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    
+
+    
 
     # Return my parent.
     def getParent(self):
@@ -466,25 +534,11 @@ class XmlNode(object):
         return XmlNode(copy.deepcopy(self.node))
 
 
-    # Example output (where <projects> is root):
-    # [ <projects> ] --> [ <project='bopeep'> ] --> [ <decode> ] --> [ <session='0'> ] --> [ <set='4'> ] --> [ <matrix='1'> ] --> [ <row='0'> ] --> [ <QR='3'> ]
-    def getLineage(self, rootTag=None, fromRoot=True):
-        forebears = (RootTracer(rootTag)).visit(self)
-        if not fromRoot:
-            forebears.reverse()
-        s = ""
-        for n in forebears:
-            if len(s) > 0:
-                s += " --> " 
-            s += "[ <%s"%(n.getTag())
-            if n.hasVal():
-                s += "='%s'"%(n.getVal())
-            s += "> ]"
-        return s
+    
 
 
-    def __eq__(self, obj):
-        return isinstance(obj, XmlNode) and obj.node is self.node 
+    #def __eq__(self, obj):
+    #    return isinstance(obj, XmlNode) and obj.node is self.node 
 
     
 
